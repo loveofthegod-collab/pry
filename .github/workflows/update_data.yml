@@ -2,12 +2,16 @@ name: Update Stock Data
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5' # Berjalan automatik Isnin-Jumaat jam 5 petang WIB
-  workflow_dispatch: # Tombol manual di tab Actions
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   update-json:
     runs-on: ubuntu-latest
+    # JALUR UTAMA: Memberikan izin penuh kepada bot untuk menulis file ke dalam repositori
+    permissions:
+      contents: write
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,15 +31,12 @@ jobs:
             let masterData = {};
             let allDates = new Set();
             
-            console.log('Memulakan muat turun data untuk 47 saham...');
+            console.log('Memulai sinkronisasi data 47 saham...');
             
             for (const ticker of tickers) {
               try {
                 const res = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '.JK?range=1y&interval=1d');
-                if (!res.ok) {
-                  console.log(ticker + ' skip (Status HTTP: ' + res.status + ')');
-                  continue;
-                }
+                if (!res.ok) continue;
                 const data = await res.json();
                 const result = data.chart?.result?.[0];
                 if (!result) continue;
@@ -51,22 +52,19 @@ jobs:
                     masterData[dateStr][ticker] = Math.round(closes[i]);
                   }
                 }
-                console.log(ticker + ' berjaya diproses.');
-              } catch (e) { 
-                console.log('Gagal fetch ' + ticker + ' disebabkan: ' + e.message); 
+                console.log(ticker + ' sukses.');
+              } catch (e) {
+                console.log('Gagal fetch ' + ticker);
               }
               await new Promise(resolve => setTimeout(resolve, 150));
             }
             
             let sortedDates = Array.from(allDates).sort();
             let lastPrices = {};
-            
-            // Inisialisasi awal untuk mengelakkan nilai undefined
             tickers.forEach(t => lastPrices[t] = 0);
             
             let finalHistory = [];
             
-            // Proses Forward-Fill yang selamat daripada ralat runtime
             sortedDates.forEach(dateStr => {
               let prices = {};
               tickers.forEach(ticker => {
@@ -81,7 +79,7 @@ jobs:
             });
             
             fs.writeFileSync('data.json', JSON.stringify({ tickers, history: finalHistory }, null, 2));
-            console.log('Fail data.json berjaya dicipta dengan ' + finalHistory.length + ' hari bursa.');
+            console.log('data.json berhasil dibuat.');
           })();
           "
 
