@@ -1,0 +1,81 @@
+name: Update Stock Data
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5' # Berjalan automatik setiap Isnin-Jumaat jam 5 petang WIB
+  workflow_dispatch: # Boleh dijalankan secara manual pada bila-bila masa
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch Data from Yahoo Finance
+        run: |
+          node -e "
+          const fs = require('fs');
+          const tickers = ['BBCA','BMRI','BBRI','BBNI','BRIS','BBTN','ARTO','BTPN','BNGA','BDMN','PNBN','MEGA','NISP','BTPS','BJBR','BJTM','BBYB','BANK','BINA','BSIM','AGRO','SDRA','BBKP','BACA','DNAR','NOBU','BABP','BVIC','PNBS','MCOR','MAYA','MASB','BMAS','BBHI','BGTG','AMAR','AGRS','BKSW','INPC','BBSI','BBMD','BEKS','BSWD','CCBI','LPPS','PANS','VINS'];
+          
+          async function getStockData() {
+            let masterData = {};
+            let allDates = new Set();
+            
+            for (const ticker of tickers) {
+              try {
+                const res = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '.JK?range=1y&interval=1d');
+                if (!res.ok) continue;
+                const data = await res.json();
+                const result = data.chart?.result?.[0];
+                if (!result) continue;
+                
+                const timestamps = result.timestamp || [];
+                const closes = result.indicators.quote[0].close || [];
+                
+                for (let i = 0; i < timestamps.length; i++) {
+                  if (closes[i] !== null && closes[i] !== undefined) {
+                    const dateStr = new Date(timestamps[i] * 1000).toISOString().split('T')[0];
+                    allDates.add(dateStr);
+                    if (!masterData[dateStr]) masterData[dateStr] = {};
+                    masterData[dateStr][ticker] = Math.round(closes[i]);
+                  }
+                }
+              } catch (e) { console.log('Gagal fetch ' + ticker); }
+            }
+            
+            let sortedDates = Array.from(allDates).sort();
+            let lastPrices = {};
+            let finalHistory = [];
+            
+            sortedDates.forEach(dateStr => {
+              let prices = {};
+              tickers.forEach(ticker => {
+                if (masterData[dateStr] && masterData[dateStr][ticker] !== undefined) {
+                  prices[ticker] = masterData[dateStr][ticker];
+                  lastPrices[ticker] = masterData[dateStr][ticker];
+                } else {
+                  prices[ticker] = lastPrices[ticker] || 0; // Mengatasi masalah saham tidur / tiada transaksi
+                }
+              });
+              finalHistory.push({ dateStr, prices });
+            });
+            
+            fs.writeFileSync('data.json', JSON.stringify({ tickers, history: finalHistory }, null, 2));
+            console.log('Data berjaya dikemas kini!');
+          }
+          getStockData();
+          "
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git commit -m "Automated: Kemas kini data saham perbankan" || exit 0
+          git push
