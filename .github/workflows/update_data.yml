@@ -1,0 +1,94 @@
+name: Update Stock Data
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5' # Berjalan automatik Isnin-Jumaat jam 5 petang WIB
+  workflow_dispatch: # Tombol manual di tab Actions
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js v20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch Data from Yahoo Finance
+        run: |
+          node -e "
+          const fs = require('fs');
+          const tickers = ['BBCA','BMRI','BBRI','BBNI','BRIS','BBTN','ARTO','BTPN','BNGA','BDMN','PNBN','MEGA','NISP','BTPS','BJBR','BJTM','BBYB','BANK','BINA','BSIM','AGRO','SDRA','BBKP','BACA','DNAR','NOBU','BABP','BVIC','PNBS','MCOR','MAYA','MASB','BMAS','BBHI','BGTG','AMAR','AGRS','BKSW','INPC','BBSI','BBMD','BEKS','BSWD','CCBI','LPPS','PANS','VINS'];
+          
+          (async () => {
+            let masterData = {};
+            let allDates = new Set();
+            
+            console.log('Memulakan muat turun data untuk 47 saham...');
+            
+            for (const ticker of tickers) {
+              try {
+                const res = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '.JK?range=1y&interval=1d');
+                if (!res.ok) {
+                  console.log(ticker + ' skip (Status HTTP: ' + res.status + ')');
+                  continue;
+                }
+                const data = await res.json();
+                const result = data.chart?.result?.[0];
+                if (!result) continue;
+                
+                const timestamps = result.timestamp || [];
+                const closes = result.indicators?.quote?.[0]?.close || [];
+                
+                for (let i = 0; i < timestamps.length; i++) {
+                  if (closes[i] !== null && closes[i] !== undefined) {
+                    const dateStr = new Date(timestamps[i] * 1000).toISOString().split('T')[0];
+                    allDates.add(dateStr);
+                    if (!masterData[dateStr]) masterData[dateStr] = {};
+                    masterData[dateStr][ticker] = Math.round(closes[i]);
+                  }
+                }
+                console.log(ticker + ' berjaya diproses.');
+              } catch (e) { 
+                console.log('Gagal fetch ' + ticker + ' disebabkan: ' + e.message); 
+              }
+              await new Promise(resolve => setTimeout(resolve, 150));
+            }
+            
+            let sortedDates = Array.from(allDates).sort();
+            let lastPrices = {};
+            
+            // Inisialisasi awal untuk mengelakkan nilai undefined
+            tickers.forEach(t => lastPrices[t] = 0);
+            
+            let finalHistory = [];
+            
+            // Proses Forward-Fill yang selamat daripada ralat runtime
+            sortedDates.forEach(dateStr => {
+              let prices = {};
+              tickers.forEach(ticker => {
+                if (masterData[dateStr] && masterData[dateStr][ticker] !== undefined && masterData[dateStr][ticker] !== null) {
+                  prices[ticker] = masterData[dateStr][ticker];
+                  lastPrices[ticker] = masterData[dateStr][ticker];
+                } else {
+                  prices[ticker] = lastPrices[ticker];
+                }
+              });
+              finalHistory.push({ dateStr, prices });
+            });
+            
+            fs.writeFileSync('data.json', JSON.stringify({ tickers, history: finalHistory }, null, 2));
+            console.log('Fail data.json berjaya dicipta dengan ' + finalHistory.length + ' hari bursa.');
+          })();
+          "
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git commit -m "Automated: Sinkronisasi data 47 saham perbankan" || exit 0
+          git push
