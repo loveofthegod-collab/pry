@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Saham Perbankan Indonesia - Serverless</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --bg-color: #f8f9fa; --panel-bg: #ffffff; --text-main: #202124; --border-color: #dadce0; --primary-color: #1a73e8; }
+        body { font-family: system-ui, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; }
+        .container { max-width: 100%; margin: 0 auto; background: var(--panel-bg); padding: 20px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+        h1 { text-align: center; font-size: 24px; margin-bottom: 20px; }
+        .chart-container { position: relative; height: 450px; width: 100%; margin-bottom: 30px; }
+        .table-wrapper { overflow-x: auto; max-height: 500px; border: 1px solid var(--border-color); border-radius: 8px; }
+        table { border-collapse: collapse; width: 100%; font-size: 13px; white-space: nowrap; }
+        th, td { padding: 10px 14px; border: 1px solid rgba(0,0,0,0.05); text-align: right; }
+        th { background-color: #f1f3f4; color: #3c4043; position: sticky; top: 0; z-index: 10; text-align: center; }
+        td:first-child, th:first-child { position: sticky; left: 0; background-color: #f1f3f4; z-index: 11; font-weight: bold; border-right: 2px solid var(--border-color); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Analisis 47 Saham Perbankan Indonesia (Antipeluru via GitHub Actions)</h1>
+    <div class="chart-container"><canvas id="compareChart"></canvas></div>
+    <div class="table-wrapper">
+        <table>
+            <thead><tr id="tableHeader"></tr></thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    let myChart = null;
+
+    async function loadData() {
+        try {
+            const response = await fetch('data.json');
+            const data = await response.json();
+            
+            const tickers = data.tickers;
+            const history = data.history.reverse(); 
+
+            const thead = document.getElementById('tableHeader');
+            thead.innerHTML = '<th>Tanggal</th>';
+            tickers.forEach(t => thead.innerHTML += `<th>${t}</th>`);
+
+            const tbody = document.getElementById('tableBody');
+            history.forEach(row => {
+                let tr = document.createElement('tr');
+                let tdDate = document.createElement('td');
+                tdDate.textContent = row.dateStr;
+                tr.appendChild(tdDate);
+
+                tickers.forEach(t => {
+                    let td = document.createElement('td');
+                    td.textContent = row.prices[t] > 0 ? 'Rp' + row.prices[t].toLocaleString('id-ID') : '-';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+
+            const chartData = [...data.history];
+            const ctx = document.getElementById('compareChart').getContext('2d');
+            const labels = chartData.map(d => d.dateStr);
+
+            const datasets = tickers.map((ticker, index) => {
+                const hue = (index * 137.5) % 360;
+                return {
+                    label: ticker,
+                    data: chartData.map(d => d.prices[ticker]),
+                    borderColor: `hsl(${hue}, 70%, 50%)`,
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    hidden: index >= 5 
+                };
+            });
+
+            if (myChart) myChart.destroy();
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+
+        } catch (e) {
+            document.querySelector('.container').innerHTML = `<h2>Gagal memuat data.json. Sila pastikan bot GitHub Actions telah berjalan sekurang-kurangnya sekali untuk menjana data.</h2>`;
+        }
+    }
+
+    window.onload = loadData;
+</script>
+</body>
+</html>
