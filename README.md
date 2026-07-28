@@ -1,40 +1,56 @@
 <div align="center">
 
-# 📊 Financial Data Automation & API
+# 📈 Financial Data Automation & API
 
-[![GitHub Actions Status](https://img.shields.io/badge/GitHub_Actions-Automated-blue?logo=githubactions&logoColor=white)](https://github.com)
-[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers%20%26%20Pages-orange?logo=cloudflare&logoColor=white)](https://cloudflare.com)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+<p align="center">
+  <b>Sistem Otomatisasi Data Saham & Perbankan Berbasis Cloudflare Workers</b>
+</p>
 
-*Sistem otomatisasi penarikan data saham perbankan (5Y) & LQ45 berbasis Cloudflare Workers & GitHub Actions.*
+[![GitHub Actions Status](https://img.shields.io/badge/GitHub_Actions-Automated-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)](https://cloudflare.com)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+
+---
+
+### 🌐 Live Demo & Endpoints
+
+| Platform | URL |
+| :--- | :--- |
+| ⚡ **Cloudflare Worker API** | [khususheet.loveofthegod.workers.dev](https://khususheet.loveofthegod.workers.dev/) |
+| 🌐 **GitHub Pages** | [loveofthegod-collab.github.io/pry](https://loveofthegod-collab.github.io/pry/) |
 
 </div>
 
 ---
 
-## 🌟 Fitur Utama
+## ⚡ Ringkasan Proyek
 
-- 🔄 **Automated Sync:** Pembaruan data harian/berkala secara otomatis menggunakan GitHub Actions.
-- ⚡ **High Performance:** Di-host pada jaringan global Cloudflare Workers / Pages untuk akses super cepat.
-- 📈 **Data Coverage:**
-  - Data historis saham perbankan (5 tahun).
-  - Indeks saham **LQ45** ter-update.
+Repository ini berfungsi untuk menarik, memproses, dan memperbarui data keuangan/saham secara otomatis. Terintegrasi langsung dengan **GitHub Actions** untuk jadwal pembaruan berkala dan di-deploy ke **Cloudflare Workers / Pages** agar data dapat diakses dengan cepat.
 
----
-
-## 🛠️ Teknologi yang Digunakan
-
-| Komponen | Teknologi / Layanan | Fungsi |
-| :--- | :--- | :--- |
-| **Automation** | GitHub Actions | Menjalankan *cron job* penarikan data |
-| **Deployment** | Cloudflare Workers / Pages | Menyajikan API & frontend (*serverless*) |
-| **Configuration** | `wrangler.jsonc` | Pengaturan deployment Cloudflare |
+### ✨ Fitur Utama
+- 🔄 **Otomatisasi Penuh:** Fitur cron-job via GitHub Actions untuk *update* data (5Y Bank & LQ45).
+- 🚀 **Performa Tinggi:** *Serverless architecture* menggunakan Cloudflare Workers.
+- 📡 **API Ready:** Menyediakan *endpoint* siap pakai untuk konsumsi data harian.
 
 ---
 
-## 🚀 Cara Memulai / Penggunaan
+## 🛠️ Stack Teknologi
 
-1. **Clone Repository:**
-   ```bash
-   git clone [https://github.com/loveofthegod-collab/](https://github.com/loveofthegod-collab/)<nama-repo-kamu>.git
-   cd <nama-repo-kamu>
+- **Language / Runtime:** JavaScript / Node.js
+- **Automation / CI-CD:** GitHub Actions
+- **Hosting / Serverless:** Cloudflare Workers & Pages
+- **Config:** `wrangler.jsonc`
+
+---
+
+## 🚀 Panduan Lokal (Local Development)
+
+```bash
+# 1. Clone repository
+git clone [https://github.com/loveofthegod-collab/pry.git](https://github.com/loveofthegod-collab/pry.git)
+
+# 2. Masuk ke direktori
+cd pry
+
+# 3. Jalankan server lokal Cloudflare Wrangler
+npx wrangler dev
