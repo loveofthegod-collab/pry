@@ -1,35 +1,40 @@
-name: Update Stock Data - Meta Version
+name: Update Stock Data
 
 on:
   schedule:
-    # 17:30 WIB = 10:30 UTC, 1.5 jam setelah BEI tutup jam 15:00 WIB
-    # Waktu paling aman biar data Yahoo sudah final & tidak intraday
-    - cron: '45 10 * * 1-5'
+    # 17:30 WIB = 10:30 UTC, 1.5 jam setelah BEI tutup (15:00 WIB)
+    # Paling aman biar data Yahoo sudah FINAL
+    - cron: '30 10 * * 1-5'
   workflow_dispatch:
+
+concurrency:
+  group: update-data-bank
+  cancel-in-progress: false
 
 jobs:
   update-json:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Node.js v24
         uses: actions/setup-node@v5
         with:
           node-version: '24'
 
-      - name: Fetch Data from Yahoo Finance
+      - name: Fetch Data from Yahoo Finance (Production)
         run: |
           node -e "
           const fs = require('fs');
           const tickers = [
-            // 46 Saham Perbankan Indonesia + BANK
+            // 48 Saham Perbankan Indonesia + BANK
             'AGRO','AGRS','AMAR','ARTO','BABP','BACA','BANK','BBCA','BBHI','BBKP','BBMD','BBNI','BBRI','BBSI','BBTN','BBYB','BCIC','BDMN','BGTG','BINA','BJBR','BJTM','BKSW','BMAS','BMRI','BNBA','BNGA','BNII','BNLI','BRIS','BSIM','BSWD','BTPN','BTPS','BVIC','DNAR','INPC','MASB','MAYA','MCOR','MEGA','NISP','NOBU','PNBN','PNBS','SDRA','SUPA',
-            // 10 Saham LQ45 Populer non-bank
+            // 10 Saham LQ45 Populer non-bank + IHSG
             'ASII','TLKM','GOTO','UNTR','JKSE','SMGR','KLBF','ICBP','ANTM','EXCL'
           ];
 
@@ -50,9 +55,7 @@ jobs:
                   await sleep(5000);
                   continue;
                 }
-                if (!res.ok) {
-                  throw new Error('HTTP ' + res.status);
-                }
+                if (!res.ok) throw new Error('HTTP ' + res.status);
 
                 const json = await res.json();
                 const result = json.chart?.result?.[0];
@@ -62,7 +65,7 @@ jobs:
               } catch (err) {
                 console.log('⚠️ ' + ticker + ' attempt ' + attempt + ' gagal: ' + err.message);
                 if (attempt === retries) return null;
-                await sleep(1000 * attempt); // backoff 1s, 2s, 3s
+                await sleep(1000 * attempt);
               }
             }
             return null;
@@ -71,7 +74,7 @@ jobs:
           (async () => {
             let masterData = {};
             let allDates = new Set();
-            console.log('🚀 Mulai sinkronisasi ' + tickers.length + ' saham (5 tahun) - Meta Version');
+            console.log('🚀 Mulai sinkronisasi ' + tickers.length + ' saham (5 tahun) - Final Version');
 
             for (const ticker of tickers) {
               const result = await fetchWithRetry(ticker);
@@ -95,10 +98,10 @@ jobs:
               }
               console.log('✅ ' + ticker + ' sukses (' + validCount + ' data)');
               
-              await sleep(250); // aman dari rate limit Yahoo
+              await sleep(250);
             }
 
-            // Forward-fill logic + sorting
+            // Forward-fill + sorting (handle libur BEI)
             let sortedDates = Array.from(allDates).sort();
             let lastPrices = {};
             tickers.forEach(t => lastPrices[t] = 0);
@@ -117,21 +120,38 @@ jobs:
               finalHistory.push({ dateStr, prices });
             }
 
-            // Validasi akhir
             if (finalHistory.length === 0) {
               console.error('Gagal total: history kosong');
               process.exit(1);
             }
 
-            fs.writeFileSync('data.json', JSON.stringify({ tickers, history: finalHistory, last_updated: new Date().toISOString() }, null, 2));
+            const output = {
+              tickers,
+              history: finalHistory,
+              last_updated: new Date().toISOString(),
+              last_updated_wib: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
+              total_days: finalHistory.length,
+              source: 'Yahoo Finance - BEI'
+            };
+
+            fs.writeFileSync('data.json', JSON.stringify(output, null, 2));
             console.log('🎉 data.json berhasil: ' + finalHistory.length + ' hari, ' + tickers.length + ' ticker');
           })();
           "
+
+      - name: Validate data.json
+        run: |
+          ls -lh data.json
+          node -e "const d=require('./data.json'); console.log('Tickers:', d.tickers.length, '| Days:', d.history.length, '| Last:', d.last_updated_wib); if(d.history.length < 100) throw new Error('Data too short')"
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add data.json
-          git diff --staged --quiet || git commit -m "Automated: Update 5y bank + LQ45 data [Meta Fix: retry + UA + WIB]"
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Automated: Update 5y bank + LQ45 data - Final Prod $(date +'%Y-%m-%d %H:%M WIB')"
+            git push
+          fi
