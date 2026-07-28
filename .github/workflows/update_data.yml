@@ -1,85 +1,130 @@
-name: Update Stock Data
+name: Update Stock Data - Meta Version
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5'
+    # 17:30 WIB = 10:30 UTC, 1.5 jam setelah BEI tutup jam 15:00 WIB
+    # Waktu paling aman biar data Yahoo sudah final & tidak intraday
+    - cron: '45 10 * * 1-5'
   workflow_dispatch:
 
 jobs:
   update-json:
     runs-on: ubuntu-latest
-    # JALUR UTAMA: Memberikan izin penuh kepada bot untuk menulis file ke dalam repositori
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
-      - name: Setup Node.js v20
-        uses: actions/setup-node@v4
+      - name: Setup Node.js v24
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Fetch Data from Yahoo Finance
         run: |
           node -e "
           const fs = require('fs');
-          const tickers = ['BBCA','BMRI','BBRI','BBNI','BRIS','BBTN','ARTO','BTPN','BNGA','BDMN','PNBN','MEGA','NISP','BTPS','BJBR','BJTM','BBYB','BANK','BINA','BSIM','AGRO','SDRA','BBKP','BACA','DNAR','NOBU','BABP','BVIC','PNBS','MCOR','MAYA','MASB','BMAS','BBHI','BGTG','AMAR','AGRS','BKSW','INPC','BBSI','BBMD','BEKS','BSWD','CCBI','LPPS','PANS','VINS'];
-          
+          const tickers = [
+            // 46 Saham Perbankan Indonesia + BANK
+            'AGRO','AGRS','AMAR','ARTO','BABP','BACA','BANK','BBCA','BBHI','BBKP','BBMD','BBNI','BBRI','BBSI','BBTN','BBYB','BCIC','BDMN','BGTG','BINA','BJBR','BJTM','BKSW','BMAS','BMRI','BNBA','BNGA','BNII','BNLI','BRIS','BSIM','BSWD','BTPN','BTPS','BVIC','DNAR','INPC','MASB','MAYA','MCOR','MEGA','NISP','NOBU','PNBN','PNBS','SDRA','SUPA',
+            // 10 Saham LQ45 Populer non-bank
+            'ASII','TLKM','GOTO','UNTR','JKSE','SMGR','KLBF','ICBP','ANTM','EXCL'
+          ];
+
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+          async function fetchWithRetry(ticker, retries = 3) {
+            for (let attempt = 1; attempt <= retries; attempt++) {
+              try {
+                const res = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '.JK?range=5y&interval=1d', {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json'
+                  }
+                });
+
+                if (res.status === 429) {
+                  console.log('⏳ Rate limit ' + ticker + ' attempt ' + attempt + ', tunggu 5s...');
+                  await sleep(5000);
+                  continue;
+                }
+                if (!res.ok) {
+                  throw new Error('HTTP ' + res.status);
+                }
+
+                const json = await res.json();
+                const result = json.chart?.result?.[0];
+                if (!result?.timestamp) throw new Error('Data kosong');
+                
+                return result;
+              } catch (err) {
+                console.log('⚠️ ' + ticker + ' attempt ' + attempt + ' gagal: ' + err.message);
+                if (attempt === retries) return null;
+                await sleep(1000 * attempt); // backoff 1s, 2s, 3s
+              }
+            }
+            return null;
+          }
+
           (async () => {
             let masterData = {};
             let allDates = new Set();
-            
-            console.log('Memulai sinkronisasi data 47 saham...');
-            
+            console.log('🚀 Mulai sinkronisasi ' + tickers.length + ' saham (5 tahun) - Meta Version');
+
             for (const ticker of tickers) {
-              try {
-                const res = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '.JK?range=1y&interval=1d');
-                if (!res.ok) continue;
-                const data = await res.json();
-                const result = data.chart?.result?.[0];
-                if (!result) continue;
-                
-                const timestamps = result.timestamp || [];
-                const closes = result.indicators?.quote?.[0]?.close || [];
-                
-                for (let i = 0; i < timestamps.length; i++) {
-                  if (closes[i] !== null && closes[i] !== undefined) {
-                    const dateStr = new Date(timestamps[i] * 1000).toISOString().split('T')[0];
-                    allDates.add(dateStr);
-                    if (!masterData[dateStr]) masterData[dateStr] = {};
-                    masterData[dateStr][ticker] = Math.round(closes[i]);
-                  }
-                }
-                console.log(ticker + ' sukses.');
-              } catch (e) {
-                console.log('Gagal fetch ' + ticker);
+              const result = await fetchWithRetry(ticker);
+              if (!result) {
+                console.log('❌ ' + ticker + ' final gagal');
+                continue;
               }
-              await new Promise(resolve => setTimeout(resolve, 150));
+
+              const timestamps = result.timestamp || [];
+              const closes = result.indicators?.quote?.[0]?.close || [];
+
+              let validCount = 0;
+              for (let i = 0; i < timestamps.length; i++) {
+                if (closes[i] == null) continue;
+                // Fix WIB: pakai Asia/Jakarta biar tidak geser 1 hari
+                const dateStr = new Date(timestamps[i] * 1000).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+                allDates.add(dateStr);
+                if (!masterData[dateStr]) masterData[dateStr] = {};
+                masterData[dateStr][ticker] = Math.round(closes[i]);
+                validCount++;
+              }
+              console.log('✅ ' + ticker + ' sukses (' + validCount + ' data)');
+              
+              await sleep(250); // aman dari rate limit Yahoo
             }
-            
+
+            // Forward-fill logic + sorting
             let sortedDates = Array.from(allDates).sort();
             let lastPrices = {};
             tickers.forEach(t => lastPrices[t] = 0);
-            
             let finalHistory = [];
-            
-            sortedDates.forEach(dateStr => {
+
+            for (const dateStr of sortedDates) {
               let prices = {};
-              tickers.forEach(ticker => {
-                if (masterData[dateStr] && masterData[dateStr][ticker] !== undefined && masterData[dateStr][ticker] !== null) {
+              for (const ticker of tickers) {
+                if (masterData[dateStr]?.[ticker] != null) {
                   prices[ticker] = masterData[dateStr][ticker];
-                  lastPrices[ticker] = masterData[dateStr][ticker];
+                  lastPrices[ticker] = prices[ticker];
                 } else {
                   prices[ticker] = lastPrices[ticker];
                 }
-              });
+              }
               finalHistory.push({ dateStr, prices });
-            });
-            
-            fs.writeFileSync('data.json', JSON.stringify({ tickers, history: finalHistory }, null, 2));
-            console.log('data.json berhasil dibuat.');
+            }
+
+            // Validasi akhir
+            if (finalHistory.length === 0) {
+              console.error('Gagal total: history kosong');
+              process.exit(1);
+            }
+
+            fs.writeFileSync('data.json', JSON.stringify({ tickers, history: finalHistory, last_updated: new Date().toISOString() }, null, 2));
+            console.log('🎉 data.json berhasil: ' + finalHistory.length + ' hari, ' + tickers.length + ' ticker');
           })();
           "
 
@@ -88,5 +133,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add data.json
-          git commit -m "Automated: Sinkronisasi data 47 saham perbankan" || exit 0
+          git diff --staged --quiet || git commit -m "Automated: Update 5y bank + LQ45 data [Meta Fix: retry + UA + WIB]"
           git push
