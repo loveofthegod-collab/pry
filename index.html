@@ -413,7 +413,7 @@
         </div>
 
         <div class="header">
-            <h1><i class="fas fa-chart-line"></i> WILLIAM YAP · Live Dashboard</h1>
+            <h1><i class="fas fa-chart-line"></i> IDX Bank · Live Dashboard</h1>
             <p>Real-time Market Intelligence & Portfolio Analytics</p>
             <button class="dark-toggle" id="darkToggle"><i class="fas fa-sun"></i> Light</button>
         </div>
@@ -704,7 +704,7 @@
 
         async function loadDashboardData() {
             try {
-                const response = await fetch('https://loveofthegod-collab.github.io/analis/data.json');
+                const response = await fetch('https://loveofthegod-collab.github.io/pry/data.json');
                 const data = await response.json();
                 originalData = data;
                 appData = compressData(data);
@@ -1469,26 +1469,27 @@
             container.innerHTML = html;
         }
 
-        // Database 57 Saham sesuai permintaan
-        const STOCK_NAMES = {
-            "BBCA": "Bank Central Asia", "BMRI": "Bank Mandiri", "BBRI": "Bank Rakyat Indonesia",
-            "BBNI": "Bank Negara Indonesia", "BRIS": "Bank Syariah Indonesia", "BBTN": "Bank Tabungan Negara",
-            "ARTO": "Bank Jago", "BTPN": "Bank BTPN", "BNGA": "Bank CIMB Niaga", "BDMN": "Bank Danamon",
-            "PNBN": "Bank Pan Indonesia", "MEGA": "Bank Mega", "NISP": "Bank OCBC NISP", "BTPS": "Bank BTPN Syariah",
-            "BJBR": "Bank Pembangunan Daerah Jawa Barat", "BJTM": "Bank Pembangunan Daerah Jawa Timur",
-            "BBYB": "Bank Neo Commerce", "BANK": "Bank Aladin Syariah", "BINA": "Bank Ina Perdana",
-            "BSIM": "Bank Sinarmas", "AGRO": "Bank Raya Indonesia", "SDRA": "Bank Woori Saudara",
-            "BBKP": "Bank KB Bukopin", "BACA": "Bank Capital Indonesia", "DNAR": "Bank Oke Indonesia",
-            "NOBU": "Bank Nationalnobu", "BABP": "Bank MNC Internasional", "BVIC": "Bank Victoria Internasional",
-            "PNBS": "Bank Panin Dubai Syariah", "MAYA": "Bank Mayapada Internasional", "MASB": "Bank Multiarta Sentosa",
-            "BMAS": "Bank Maspion Indonesia", "BBHI": "Allo Bank Indonesia", "BGTG": "Bank Ganesha",
-            "AMAR": "Bank Amar Indonesia", "AGRS": "Bank IBK Indonesia", "BKSW": "Bank QNB Indonesia",
-            "INPC": "Bank Artha Graha Internasional", "BBSI": "Krom Bank Indonesia", "BBMD": "Bank Mestika Dharma",
-            "BEKS": "Bank Pembangunan Daerah Banten", "BSWD": "Bank of India Indonesia", "MCOR": "Bank China Construction",
-            "LPPS": "Lippo Securities", "PANS": "Panin Sekuritas", "VINS": "Victoria Investama",
-            "ASII": "Astra International", "TLKM": "Telkom Indonesia", "GOTO": "GoTo Gojek Tokopedia",
-            "UNTR": "United Tractors", "INTP": "Indocement Tunggal Prakarsa", "SMGR": "Semen Indonesia",
-            "KLBF": "Kalbe Farma", "ICBP": "Indofood CBP Sukses Makmur", "ANTM": "Aneka Tambang", "EXCL": "XL Axiata"
+        // Database 57 Saham sesuai update github
+            const STOCK_NAMES = {
+            "AGRO": "Bank Raya Indonesia", "AGRS": "Bank IBK Indonesia", "AMAR": "Bank Amar Indonesia",
+            "ARTO": "Bank Jago", "BABP": "Bank MNC Internasional", "BACA": "Bank Capital Indonesia",
+            "BANK": "Bank Aladin Syariah", "BBCA": "Bank Central Asia", "BBHI": "Allo Bank Indonesia",
+            "BBKP": "Bank KB Bukopin", "BBMD": "Bank Mestika Dharma", "BBNI": "Bank Negara Indonesia",
+            "BBRI": "Bank Rakyat Indonesia", "BBSI": "Krom Bank Indonesia", "BBTN": "Bank Tabungan Negara",
+            "BBYB": "Bank Neo Commerce", "BCIC": "PT Bank JTrust Indonesia Tbk", "BDMN": "Bank Danamon",
+            "BGTG": "Bank Ganesha", "BINA": "Bank Ina Perdana", "BJBR": "Bank Pembangunan Daerah Jawa Barat",
+            "BJTM": "Bank Pembangunan Daerah Jawa Timur", "BKSW": "Bank QNB Indonesia", "BMAS": "Bank Maspion Indonesia",
+            "BMRI": "Bank Mandiri", "BNBA": "PT Bank Bumi Arta Tbk", "BNGA": "Bank CIMB Niaga",
+            "BNII": "PT Bank Maybank Indonesia Tbk", "BNLI": "PT Bank Permata Tbk", "BRIS": "Bank Syariah Indonesia",
+            "BSIM": "Bank Sinarmas", "BSWD": "Bank of India Indonesia", "BTPN": "Bank BTPN",
+            "BTPS": "Bank BTPN Syariah", "BVIC": "Bank Victoria Internasional", "DNAR": "Bank Oke Indonesia",
+            "INPC": "Bank Artha Graha Internasional", "MASB": "Bank Multiarta Sentosa", "MAYA": "Bank Mayapada Internasional",
+            "MCOR": "Bank China Construction", "MEGA": "Bank Mega", "NISP": "Bank OCBC NISP",
+            "NOBU": "Bank Nationalnobu", "PNBN": "Bank Pan Indonesia", "PNBS": "Bank Panin Dubai Syariah",
+            "SDRA": "Bank Woori Saudara", "SUPA": "SUPERBANK", "ASII": "Astra International",
+            "TLKM": "Telkom Indonesia", "GOTO": "GoTo Gojek Tokopedia", "UNTR": "United Tractors",
+            "JKSE": "Jakarta Stock Exchange Composite Index", "SMGR": "Semen Indonesia", "KLBF": "Kalbe Farma",
+            "ICBP": "Indofood CBP Sukses Makmur", "ANTM": "Aneka Tambang", "EXCL": "XL Axiata"
         };
 
         // ================= FUNGSI PROFIL PILIHAN SAHAM (Task 2) =================
