@@ -1,0 +1,183 @@
+name: Update Stock Data
+
+on:
+  schedule:
+    - cron: '30 10 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: update-data-bank
+  cancel-in-progress: false
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js v24
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Fetch Data from Yahoo Finance (Production - FIXED JKSE)
+        run: |
+          node -e "
+          const fs = require('fs');
+          const tickers = [
+            'AGRO','AGRS','AMAR','ARTO','BABP','BACA','BANK','BBCA','BBHI','BBKP','BBMD','BBNI','BBRI','BBSI','BBTN','BBYB','BCIC','BDMN','BGTG','BINA','BJBR','BJTM','BKSW','BMAS','BMRI','BNBA','BNGA','BNII','BNLI','BRIS','BSIM','BSWD','BTPN','BTPS','BVIC','DNAR','INPC','MASB','MAYA','MCOR','MEGA','NISP','NOBU','PNBN','PNBS','SDRA','SUPA',
+            'ASII','TLKM','GOTO','UNTR','^JKSE','SMGR','KLBF','ICBP','ANTM','EXCL'
+          ];
+
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+          function getYahooUrl(ticker) {
+            // FIX UTAMA DI SINI - JKSE itu spesial, gak pakai .JK
+            let yahooTicker;
+            if (ticker === '^JKSE' || ticker === 'JKSE' || ticker === 'IHSG') {
+              yahooTicker = '%5EJKSE'; // ^ harus di-encode jadi %5E
+            } else {
+              yahooTicker = ticker + '.JK';
+            }
+            return 'https://query1.finance.yahoo.com/v8/finance/chart/' + yahooTicker + '?range=5y&interval=1d';
+          }
+
+          async function fetchWithRetry(ticker, retries = 3) {
+            const url = getYahooUrl(ticker);
+            for (let attempt = 1; attempt <= retries; attempt++) {
+              try {
+                console.log('Fetching ' + ticker + ' -> ' + url);
+                const res = await fetch(url, {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json'
+                  }
+                });
+
+                if (res.status === 429) {
+                  console.log('⏳ Rate limit ' + ticker + ' attempt ' + attempt + ', tunggu 5s...');
+                  await sleep(5000);
+                  continue;
+                }
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+
+                const json = await res.json();
+                const result = json.chart?.result?.[0];
+                if (!result?.timestamp) throw new Error('Data kosong - ' + JSON.stringify(json.chart?.error));
+                
+                return result;
+              } catch (err) {
+                console.log('⚠️ ' + ticker + ' attempt ' + attempt + ' gagal: ' + err.message);
+                if (attempt === retries) return null;
+                await sleep(1000 * attempt);
+              }
+            }
+            return null;
+          }
+
+          (async () => {
+            let masterData = {};
+            let allDates = new Set();
+            console.log('🚀 Mulai sinkronisasi ' + tickers.length + ' saham (5 tahun) - FIXED JKSE Version');
+
+            for (const ticker of tickers) {
+              const result = await fetchWithRetry(ticker);
+              if (!result) {
+                console.log('❌ ' + ticker + ' final gagal - TIDAK AKAN DI-FORWARD-FILL 0');
+                continue;
+              }
+
+              const timestamps = result.timestamp || [];
+              const closes = result.indicators?.quote?.[0]?.close || [];
+
+              let validCount = 0;
+              for (let i = 0; i < timestamps.length; i++) {
+                if (closes[i] == null) continue;
+                const dateStr = new Date(timestamps[i] * 1000).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+                allDates.add(dateStr);
+                if (!masterData[dateStr]) masterData[dateStr] = {};
+                masterData[dateStr][ticker] = Math.round(closes[i]);
+                validCount++;
+              }
+              console.log('✅ ' + ticker + ' sukses (' + validCount + ' data)');
+              
+              await sleep(300);
+            }
+
+            // Forward-fill - FIX: jangan init 0, init null biar ketauan yang gagal
+            let sortedDates = Array.from(allDates).sort();
+            let lastPrices = {};
+            tickers.forEach(t => lastPrices[t] = null);
+            let finalHistory = [];
+
+            for (const dateStr of sortedDates) {
+              let prices = {};
+              for (const ticker of tickers) {
+                if (masterData[dateStr]?.[ticker] != null) {
+                  prices[ticker] = masterData[dateStr][ticker];
+                  lastPrices[ticker] = prices[ticker];
+                } else {
+                  // kalau belum pernah ada data valid, jangan isi 0, biarin null dulu
+                  // baru setelah ada data pertama, forward-fill
+                  prices[ticker] = lastPrices[ticker] != null ? lastPrices[ticker] : 0;
+                }
+              }
+              // Hapus ticker yang masih 0/null dari awal sampai akhir (gagal total)
+              finalHistory.push({ dateStr, prices });
+            }
+
+            // Validasi khusus JKSE
+            const jkseSample = finalHistory.slice(-5).map(d => d.prices['^JKSE']);
+            console.log('Sample JKSE 5 hari terakhir:', jkseSample);
+            if (jkseSample.every(v => v === 0 || v == null)) {
+              console.error('❌ FATAL: JKSE masih 0 semua, cek URL fetch!');
+              process.exit(1);
+            }
+
+            if (finalHistory.length === 0) {
+              console.error('Gagal total: history kosong');
+              process.exit(1);
+            }
+
+            const output = {
+              tickers,
+              history: finalHistory,
+              last_updated: new Date().toISOString(),
+              last_updated_wib: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
+              total_days: finalHistory.length,
+              source: 'Yahoo Finance - BEI'
+            };
+
+            fs.writeFileSync('data.json', JSON.stringify(output, null, 2));
+            console.log('🎉 data.json berhasil: ' + finalHistory.length + ' hari, ' + tickers.length + ' ticker');
+          })();
+          "
+
+      - name: Validate data.json
+        run: |
+          ls -lh data.json
+          node -e "
+          const d=require('./data.json'); 
+          console.log('Tickers:', d.tickers.length, '| Days:', d.history.length, '| Last:', d.last_updated_wib);
+          const last = d.history[d.history.length-1];
+          console.log('Sample last day:', {JKSE: last.prices['^JKSE'], BBCA: last.prices['BBCA'], GOTO: last.prices['GOTO']});
+          if(!last.prices['^JKSE'] || last.prices['^JKSE'] < 1000) throw new Error('JKSE invalid: ' + last.prices['^JKSE']);
+          if(d.history.length < 100) throw new Error('Data too short')
+          "
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Fix: Update data + fix JKSE fetch %5EJKSE $(date +'%Y-%m-%d %H:%M WIB')"
+            git push
+          fi
