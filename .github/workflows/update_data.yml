@@ -1,0 +1,229 @@
+name: Update Stock Data - 57 Ticker 5Y Anti 429 + JKSE Fallback
+
+on:
+  schedule:
+    - cron: '30 10 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: update-data-bank
+  cancel-in-progress: false
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js v24
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Fetch Data (57 Same Order + JKSE Special Handling)
+        run: |
+          node -e "
+          const fs = require('fs');
+          const tickers =[ 'AGRO','AGRS','AMAR','ARTO','BABP','BACA','BANK','BBCA','BBHI','BBKP','BBMD','BBNI','BBRI','BBSI','BBTN','BBYB','BCIC','BDMN','BGTG','BINA','BJBR','BJTM','BKSW','BMAS','BMRI','BNBA','BNGA','BNII','BNLI','BRIS','BSIM','BSWD','BTPN','BTPS','BVIC','DNAR','INPC','MASB','MAYA','MCOR','MEGA','NISP','NOBU','PNBN','PNBS','SDRA','SUPA',
+            'ASII','TLKM','GOTO','UNTR','^JKSE','SMGR','KLBF','ICBP','ANTM','EXCL'
+            ];
+
+          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+          const jitter = (b) => b + Math.floor(Math.random()*600);
+
+          function getYahooTicker(t) {
+            if (t === '^JKSE' || t === 'JKSE' || t === 'COMPOSITE' || t === 'IHSG') return '%5EJKSE';
+            return t + '.JK';
+          }
+
+          async function getSession() {
+            let cookie='', crumb='';
+            try {
+              const r = await fetch('https://fc.yahoo.com', { headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120.0' }, redirect: 'manual' });
+              const sc = r.headers.get('set-cookie')||'';
+              const m = sc.match(/A3=[^;]+/);
+              cookie = m ? m[0] : sc.split(';')[0];
+              if (cookie) {
+                const cr = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', { headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120.0', 'Cookie': cookie } });
+                if (cr.ok) crumb = (await cr.text()).trim();
+              }
+            } catch(e){ console.log('session fail', e.message); }
+            return {cookie, crumb};
+          }
+
+          async function fetchChart(yahooTicker, session, retries=5) {
+            const bases = [
+              'https://query1.finance.yahoo.com/v8/finance/chart/' + yahooTicker + '?range=5y&interval=1d',
+              'https://query2.finance.yahoo.com/v8/finance/chart/' + yahooTicker + '?range=5y&interval=1d',
+              'https://query1.finance.yahoo.com/v8/finance/chart/' + yahooTicker + '?range=5y&interval=1d&includePrePost=false&events=div%7Csplit'
+            ];
+            for (let b=0; b<bases.length; b++) {
+              let urlBase = bases[b];
+              if (session.crumb) urlBase += '&crumb=' + encodeURIComponent(session.crumb);
+              for (let attempt=1; attempt<=retries; attempt++) {
+                try {
+                  const url = urlBase + '&_=' + Date.now();
+                  const headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json',
+                    'Referer': 'https://finance.yahoo.com/quote/' + yahooTicker + '/',
+                    'Origin': 'https://finance.yahoo.com'
+                  };
+                  if (session.cookie) headers['Cookie'] = session.cookie;
+                  const res = await fetch(url, { headers });
+                  if (res.status===429) {
+                    console.log('⏳ 429 '+yahooTicker+' base '+(b+1)+' attempt '+attempt+', tidur '+(12*attempt)+'s');
+                    await sleep(12000*attempt + jitter(1000));
+                    continue;
+                  }
+                  if (res.status===401 || res.status===403) {
+                    const ns = await getSession();
+                    if (ns.cookie) session.cookie=ns.cookie;
+                    if (ns.crumb) session.crumb=ns.crumb;
+                    await sleep(3000);
+                    continue;
+                  }
+                  if (!res.ok) throw new Error('HTTP '+res.status);
+                  const txt = await res.text();
+                  const json = JSON.parse(txt);
+                  if (json.chart?.error) throw new Error(JSON.stringify(json.chart.error));
+                  const result = json.chart?.result?.[0];
+                  if (!result?.timestamp) throw new Error('no timestamp');
+                  return result;
+                } catch(e) {
+                  console.log('⚠️ '+yahooTicker+' base '+(b+1)+' attempt '+attempt+' fail: '+e.message);
+                  if (attempt===retries && b===bases.length-1) return null;
+                  if (attempt===retries) break;
+                  await sleep(jitter(1500*attempt));
+                }
+              }
+            }
+            return null;
+          }
+
+          (async () => {
+            const session = await getSession();
+            console.log('Session:', session.cookie? 'cookie OK':'no cookie', session.crumb? 'crumb OK':'no crumb');
+
+            // Load existing data.json untuk fallback JKSE
+            let existingData = null;
+            try {
+              if (fs.existsSync('data.json')) {
+                existingData = JSON.parse(fs.readFileSync('data.json','utf8'));
+                console.log('📂 Existing data.json ada:', existingData.history?.length, 'hari, last:', existingData.history?.[existingData.history.length-1]?.dateStr);
+              }
+            } catch(e){ console.log('no existing'); }
+
+            let masterData = {};
+            let allDates = new Set();
+            let failedTickers = [];
+
+            for (let i=0;i<tickers.length;i++) {
+              const ticker = tickers[i];
+              const yahooTicker = getYahooTicker(ticker);
+              console.log('--- ['+(i+1)+'/'+tickers.length+'] '+ticker+' ---');
+              const result = await fetchChart(yahooTicker, session, ticker==='^JKSE'?7:5);
+              if (!result) {
+                console.log('❌ '+ticker+' GAGAL total, coba fallback dari file lama');
+                failedTickers.push(ticker);
+                // fallback: copy dari existingData
+                if (existingData) {
+                  for (const day of existingData.history) {
+                    if (day.prices[ticker]!=null) {
+                      const ds = day.dateStr;
+                      allDates.add(ds);
+                      if (!masterData[ds]) masterData[ds]={};
+                      masterData[ds][ticker]=day.prices[ticker];
+                    }
+                  }
+                  console.log('♻️ '+ticker+' fallback pakai '+Object.keys(masterData).length+' tanggal dari file lama');
+                }
+                continue;
+              }
+              const ts = result.timestamp||[];
+              const closes = result.indicators?.quote?.[0]?.close||[];
+              let cnt=0;
+              for (let j=0;j<ts.length;j++) {
+                if (closes[j]==null) continue;
+                const ds = new Date(ts[j]*1000).toISOString().slice(0,10);
+                allDates.add(ds);
+                if (!masterData[ds]) masterData[ds]={};
+                masterData[ds][ticker]=Math.round(closes[j]);
+                cnt++;
+              }
+              console.log('✅ '+ticker+' OK '+cnt);
+
+              await sleep(jitter(1200));
+              if ((i+1)%8===0) { console.log('😴 rest 5s'); await sleep(5000); }
+            }
+
+            let sortedDates = Array.from(allDates).sort();
+            console.log('📅 Total tanggal:', sortedDates.length, sortedDates[0], '->', sortedDates[sortedDates.length-1]);
+            console.log('Failed tickers:', failedTickers.length? failedTickers.join(','):'none');
+
+            let lastPrices={}; tickers.forEach(t=>lastPrices[t]=null);
+            let finalHistory=[];
+            for (const ds of sortedDates) {
+              let prices={};
+              for (const t of tickers) {
+                if (masterData[ds]?.[t]!=null) { prices[t]=masterData[ds][t]; lastPrices[t]=prices[t]; }
+                else prices[t]=lastPrices[t]!=null?lastPrices[t]:null;
+              }
+              if (Object.values(prices).some(v=>v!=null)) {
+                for (const t of tickers) if (prices[t]==null) prices[t]=lastPrices[t]!=null?lastPrices[t]:0;
+                finalHistory.push({ dateStr: ds, prices });
+              }
+            }
+
+            console.log('📊 Last 5 days:');
+            finalHistory.slice(-5).forEach(d=> console.log(d.dateStr, 'JKSE:', d.prices['^JKSE'], 'BBCA:', d.prices['BBCA']));
+
+            const last = finalHistory[finalHistory.length-1];
+            if (!last) { console.error('history kosong'); process.exit(1); }
+            if (!last.prices['^JKSE'] || last.prices['^JKSE']<1000) {
+              console.error('❌ JKSE masih invalid:', last.prices['^JKSE']);
+              // jangan fail total kalau cuma JKSE, tapi warning
+              if (failedTickers.includes('^JKSE') && existingData) {
+                console.log('⚠️ Pakai JKSE dari data lama untuk hari terakhir');
+              } else {
+                process.exit(1);
+              }
+            }
+
+            const out = {
+              tickers,
+              history: finalHistory,
+              last_updated: new Date().toISOString(),
+              last_updated_wib: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
+              total_days: finalHistory.length,
+              source: 'Yahoo 57 Same Order + JKSE Fallback'
+            };
+            fs.writeFileSync('data.json', JSON.stringify(out,null,2));
+            console.log('🎉 DONE:', finalHistory.length, 'hari | Size', (fs.statSync('data.json').size/1024).toFixed(1)+'KB');
+          })();
+          "
+
+      - name: Validate
+        run: |
+          ls -lh data.json
+          node -e "
+          const d=require('./data.json');
+          console.log('Tickers', d.tickers.length, 'Days', d.history.length, 'Last', d.history[d.history.length-1].dateStr);
+          console.log('Order', d.tickers[0], '->', d.tickers[d.tickers.length-1]);
+          const last=d.history[d.history.length-1];
+          console.log('JKSE', last.prices['^JKSE'], 'BBCA', last.prices['BBCA']);
+          if(d.tickers.length!==57) throw new Error('harus 57');
+          if(d.tickers[0]!=='AGRO') throw new Error('urutan berubah');
+          "
+
+      - name: Commit
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          if git diff --staged --quiet; then echo "No changes"; else git commit -m "Fix: 57 ticker + JKSE fallback $(date +'%Y-%m-%d %H:%M WIB')" && git push; fi
