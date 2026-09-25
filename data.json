@@ -74699,7 +74699,7 @@
         "TLKM": 2470,
         "GOTO": 50,
         "UNTR": 24325,
-        "^JKSE": 6385,
+        "^JKSE": 6277,
         "SMGR": 1580,
         "KLBF": 750,
         "ICBP": 6650,
@@ -74894,8 +74894,8 @@
       }
     }
   ],
-  "last_updated": "2026-09-25T09:26:10.508Z",
-  "last_updated_wib": "25/9/2026, 16.26.10",
+  "last_updated": "2026-09-25T15:28:24.535Z",
+  "last_updated_wib": "25/9/2026, 22.28.24",
   "total_days": 1207,
   "source": "Yahoo 57 Same Order + JKSE Fallback"
 }
