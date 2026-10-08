@@ -1,12 +1,12 @@
-name: Update Stock Data - ada JKSE - Anti 429
+name: Update Stock Data - 57 Ticker 5Y Anti 429 + JKSE Fallback - FIXED
 
 on:
   schedule:
-    - cron: '30 10 * * 1-5'
+    - cron: '30 10 * * 1-5' # 17:30 WIB
   workflow_dispatch:
 
 concurrency:
-  group: update-data-bank
+  group: update-data-bank-57 # FIX: beda group biar gak tabrakan sama saham2
   cancel-in-progress: false
 
 jobs:
@@ -25,18 +25,45 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Fetch Data (No JKSE)
+      - name: Fetch Data (57 Same Order + JKSE Special Handling) FIXED
         run: |
           node -e "
           const fs = require('fs');
-          // 60 ticker unik, ada JKSE
-          const tickers =[ 'AGRO','AGRS','AMAR','ARTO','BABP','BACA','BANK','BBCA','BBHI','BBKP','BBMD','BBNI','BBRI','BBSI','BBTN','BBYB','BCIC','BDMN','BGTG','BINA','BJBR','BJTM','BKSW','BMAS','BMRI','BNBA','BNGA','BNII','BNLI','BRIS','BSIM','BSWD','BTPN','BTPS','BVIC','DNAR','INPC','MASB','MAYA','MCOR','MEGA','NISP','NOBU','PNBN','PNBS','SDRA','SUPA','ASII','TLKM','GOTO','UNTR','^JKSE','SMGR','KLBF','ICBP','ANTM','EXCL'
+          const tickers =[ 'AGRO','AGRS','AMAR','ARTO','BABP','BACA','BANK','BBCA','BBHI','BBKP','BBMD','BBNI','BBRI','BBSI','BBTN','BBYB','BCIC','BDMN','BGTG','BINA','BJBR','BJTM','BKSW','BMAS','BMRI','BNBA','BNGA','BNII','BNLI','BRIS','BSIM','BSWD','BTPN','BTPS','BVIC','DNAR','INPC','MASB','MAYA','MCOR','MEGA','NISP','NOBU','PNBN','PNBS','SDRA','SUPA',
+            'ASII','TLKM','GOTO','UNTR','^JKSE','SMGR','KLBF','ICBP','ANTM','EXCL'
             ];
+
+          // === FIX: Kalender libur BEI 2026 (tambahin sesuai idx.co.id) ===
+          const BEI_HOLIDAYS = new Set([
+            '2026-01-01', // Tahun Baru
+            '2026-01-16', // Isra Miraj (contoh)
+            '2026-03-18', // Nyepi dll - isi dari idx.co.id
+            '2026-03-31', '2026-04-01', // Idul Fitri
+            '2026-05-01', // Hari Buruh - INI BIANG KEROK LO
+            '2026-05-12', // Waisak
+            '2026-05-29', // Kenaikan Isa
+            '2026-06-01', // Pancasila
+            '2026-06-06', // Idul Adha
+            '2026-08-17', // Kemerdekaan
+          ]);
+          function isBEIHoliday(ds) {
+            const d = new Date(ds+'T00:00:00Z');
+            const day = d.getUTCDay();
+            if (day===0 || day===6) return true;
+            if (BEI_HOLIDAYS.has(ds)) return true;
+            return false;
+          }
+          const todayWIB = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'});
+          if (isBEIHoliday(todayWIB)) {
+            console.log('⛔ Hari ini libur BEI ('+todayWIB+'), skip update');
+            process.exit(0);
+          }
 
           const sleep = (ms) => new Promise(r => setTimeout(r, ms));
           const jitter = (b) => b + Math.floor(Math.random()*600);
 
           function getYahooTicker(t) {
+            if (t === '^JKSE' || t === 'JKSE' || t === 'COMPOSITE' || t === 'IHSG') return '%5EJKSE';
             return t + '.JK';
           }
 
@@ -46,7 +73,7 @@ jobs:
               const r = await fetch('https://fc.yahoo.com', { headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120.0' }, redirect: 'manual' });
               const sc = r.headers.get('set-cookie')||'';
               const m = sc.match(/A3=[^;]+/);
-              cookie = m? m[0] : sc.split(';')[0];
+              cookie = m ? m[0] : sc.split(';')[0];
               if (cookie) {
                 const cr = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', { headers: { 'User-Agent': 'Mozilla/5.0 Chrome/120.0', 'Cookie': cookie } });
                 if (cr.ok) crumb = (await cr.text()).trim();
@@ -76,7 +103,7 @@ jobs:
                   if (session.cookie) headers['Cookie'] = session.cookie;
                   const res = await fetch(url, { headers });
                   if (res.status===429) {
-                    console.log('⏳ 429 '+yahooTicker+' base '+(b+1)+' attempt '+attempt+', tidur '+(12*attempt)+'s');
+                    console.log('⏳ 429 '+yahooTicker+' base '+(b+1)+' attempt '+attempt);
                     await sleep(12000*attempt + jitter(1000));
                     continue;
                   }
@@ -95,7 +122,7 @@ jobs:
                   if (!result?.timestamp) throw new Error('no timestamp');
                   return result;
                 } catch(e) {
-                  console.log('⚠ '+yahooTicker+' base '+(b+1)+' attempt '+attempt+' fail: '+e.message);
+                  console.log('⚠️ '+yahooTicker+' base '+(b+1)+' attempt '+attempt+' fail: '+e.message);
                   if (attempt===retries && b===bases.length-1) return null;
                   if (attempt===retries) break;
                   await sleep(jitter(1500*attempt));
@@ -107,13 +134,11 @@ jobs:
 
           (async () => {
             const session = await getSession();
-            console.log('Session:', session.cookie? 'cookie OK':'no cookie', session.crumb? 'crumb OK':'no crumb');
 
             let existingData = null;
             try {
-              if (fs.existsSync('saham2.json')) {
-                existingData = JSON.parse(fs.readFileSync('saham2.json','utf8'));
-                console.log('📂 Existing ada:', existingData.history?.length, 'hari');
+              if (fs.existsSync('data.json')) {
+                existingData = JSON.parse(fs.readFileSync('data.json','utf8'));
               }
             } catch(e){}
 
@@ -125,17 +150,17 @@ jobs:
               const ticker = tickers[i];
               const yahooTicker = getYahooTicker(ticker);
               console.log('--- ['+(i+1)+'/'+tickers.length+'] '+ticker+' ---');
-              const result = await fetchChart(yahooTicker, session, 5);
+              const result = await fetchChart(yahooTicker, session, ticker==='^JKSE'?7:5);
               if (!result) {
-                console.log('❌ '+ticker+' GAGAL total, coba fallback file lama');
+                console.log('❌ '+ticker+' GAGAL, fallback HANYA untuk tanggal yang sudah ada dari Yahoo (FIX)');
                 failedTickers.push(ticker);
                 if (existingData) {
                   for (const day of existingData.history) {
+                    if (isBEIHoliday(day.dateStr)) continue; // FIX: jangan copy libur
+                    if (!allDates.has(day.dateStr)) continue; // FIX: jangan nambah tanggal baru dari file lama
                     if (day.prices[ticker]!=null) {
-                      const ds = day.dateStr;
-                      allDates.add(ds);
-                      if (!masterData[ds]) masterData[ds]={};
-                      masterData[ds][ticker]=day.prices[ticker];
+                      if (!masterData[day.dateStr]) masterData[day.dateStr]={};
+                      masterData[day.dateStr][ticker]=day.prices[ticker];
                     }
                   }
                 }
@@ -147,6 +172,7 @@ jobs:
               for (let j=0;j<ts.length;j++) {
                 if (closes[j]==null) continue;
                 const ds = new Date(ts[j]*1000).toISOString().slice(0,10);
+                if (isBEIHoliday(ds)) continue; // FIX: skip libur yang ke-fetch
                 allDates.add(ds);
                 if (!masterData[ds]) masterData[ds]={};
                 masterData[ds][ticker]=Math.round(closes[j]);
@@ -154,20 +180,26 @@ jobs:
               }
               console.log('✅ '+ticker+' OK '+cnt);
               await sleep(jitter(1200));
-              if ((i+1)%8===0) { console.log('😴 rest 5s'); await sleep(5000); }
+              if ((i+1)%8===0) await sleep(5000);
             }
 
-            let sortedDates = Array.from(allDates).sort();
-            console.log('📅 Total tanggal:', sortedDates.length, sortedDates[0], '->', sortedDates[sortedDates.length-1]);
-            console.log('Failed:', failedTickers.length? failedTickers.join(','):'none');
+            let sortedDates = Array.from(allDates).sort().filter(ds => !isBEIHoliday(ds));
+            console.log('📅 Total tanggal (sudah filter libur):', sortedDates.length, sortedDates[0], '->', sortedDates[sortedDates.length-1]);
+            console.log('Failed:', failedTickers.join(',')||'none');
 
             let lastPrices={}; tickers.forEach(t=>lastPrices[t]=null);
             let finalHistory=[];
             for (const ds of sortedDates) {
               let prices={};
+              let hasRealData = false;
               for (const t of tickers) {
-                if (masterData[ds]?.[t]!=null) { prices[t]=masterData[ds][t]; lastPrices[t]=prices[t]; }
+                if (masterData[ds]?.[t]!=null) { prices[t]=masterData[ds][t]; lastPrices[t]=prices[t]; hasRealData=true; }
                 else prices[t]=lastPrices[t]!=null?lastPrices[t]:null;
+              }
+              // FIX: kalau hari itu gak ada data real sama sekali (cuma forward fill), skip biar gak duplikat libur
+              if (!hasRealData) {
+                console.log('⚠️ Skip '+ds+' karena gak ada data real (kemungkinan libur)');
+                continue;
               }
               if (Object.values(prices).some(v=>v!=null)) {
                 for (const t of tickers) if (prices[t]==null) prices[t]=lastPrices[t]!=null?lastPrices[t]:0;
@@ -175,11 +207,13 @@ jobs:
               }
             }
 
-            console.log('📊 Last 5 days:');
-            finalHistory.slice(-5).forEach(d=> console.log(d.dateStr, 'BBCA:', d.prices['BBCA']));
+            console.log('📊 Last 5:', finalHistory.slice(-5).map(d=>d.dateStr+' JKSE:'+d.prices['^JKSE']).join(' | '));
 
             const last = finalHistory[finalHistory.length-1];
-            if (!last) { console.error('history kosong'); process.exit(1); }
+            if (!last || !last.prices['^JKSE'] || last.prices['^JKSE']<1000) {
+              console.error('❌ JKSE invalid');
+              process.exit(1);
+            }
 
             const out = {
               tickers,
@@ -187,30 +221,26 @@ jobs:
               last_updated: new Date().toISOString(),
               last_updated_wib: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
               total_days: finalHistory.length,
-              source: 'Yahoo - No JKSE - Anti 429'
+              source: 'Yahoo 57 Same Order + JKSE Fallback FIXED'
             };
-            fs.writeFileSync('saham2.json', JSON.stringify(out,null,2));
-            console.log('🎉 DONE:', finalHistory.length, 'hari | Size', (fs.statSync('saham2.json').size/1024).toFixed(1)+'KB');
+            fs.writeFileSync('data.json', JSON.stringify(out,null,2));
+            console.log('🎉 DONE:', finalHistory.length);
           })();
           "
 
       - name: Validate
         run: |
-          ls -lh saham2.json
+          ls -lh data.json
           node -e "
-          const d=require('./saham2.json');
-          console.log('Tickers', d.tickers.length, 'Days', d.history.length, 'Last', d.history[d.history.length-1].dateStr);
-          console.log('Order', d.tickers[0], '->', d.tickers[d.tickers.length-1]);
-          const last=d.history[d.history.length-1];
-          console.log('BBCA', last.prices['BBCA'], 'BBRI', last.prices['BBRI']);
-          if (d.tickers.includes('^JKSE') || d.tickers.includes('JKSE')) throw new Error('masih ada JKSE!');
-          if (last.prices['^JKSE']!=null || last.prices['JKSE']!=null) throw new Error('prices masih ada JKSE');
-          if(d.tickers.length < 55) throw new Error('ticker kurang dari 55');
+          const d=require('./data.json');
+          console.log('Days', d.history.length, 'Last', d.history[d.history.length-1].dateStr);
+          if(d.history.some(h=>h.dateStr==='2026-05-01')) throw new Error('MASIH ADA 2026-05-01 LIBUR!');
+          if(d.tickers.length!==57) throw new Error('harus 57');
           "
 
       - name: Commit
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add saham2.json
-          if git diff --staged --quiet; then echo "No changes"; else git commit -m "Update: No JKSE $(date +'%Y-%m-%d %H:%M WIB')" && git push; fi
+          git add data.json
+          if git diff --staged --quiet; then echo "No changes"; else git commit -m "Fix: 57 ticker anti-libur $(date +'%Y-%m-%d %H:%M WIB')" && git push; fi
