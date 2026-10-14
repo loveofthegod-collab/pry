@@ -1,8 +1,8 @@
 name: Update Stock Data - 57 Ticker + JKSE - SAMA KAYAK SAHAM
 
 on:
-  schedule:
-    - cron: '30 10 * * 1-5' # 16:30 WIB - SAMA PERSIS KAYAK SAHAM.YML
+#  schedule:
+#    - cron: '30 10 * * 1-5' # 16:30 WIB - SAMA PERSIS KAYAK SAHAM.YML
   workflow_dispatch:
 
 concurrency:
